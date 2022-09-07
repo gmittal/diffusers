@@ -6,13 +6,15 @@ import torch.nn as nn
 from ..configuration_utils import ConfigMixin, register_to_config
 from ..modeling_utils import ModelMixin
 from .embeddings import TimestepEmbedding, Timesteps
-from .unet_blocks import UNetMidBlock2DCrossAttn, get_down_block, get_up_block
-
+from .unet_blocks import UNetMidBlock2DCrossAttn, get_down_block, get_up_block, CrossAttnDownBlock2D, CrossAttnUpBlock2D, CrossAttnDecoderPositionDownBlock2D, CrossAttnDecoderPositionUpBlock2D, UNetMidBlock2DCrossAttnDecoderPosition, CrossAttnDecoderPositionEncoderPositionDownBlock2D, CrossAttnDecoderPositionEncoderPositionUpBlock2D, UNetMidBlock2DCrossAttnDecoderPositionEncoderPosition, CrossAttnEncoderPositionDownBlock2D, CrossAttnEncoderPositionUpBlock2D, UNetMidBlock2DCrossAttnEncoderPosition
+from .unet_blocks import UNetMidBlock2DCrossAttnLSTM, CrossAttnLSTMDownBlock2D, CrossAttnLSTMUpBlock2D
+import torch
 
 class UNet2DConditionModel(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
         self,
+        gradient_checkpointing=False,
         sample_size=None,
         in_channels=4,
         out_channels=4,
@@ -30,8 +32,11 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         norm_eps=1e-5,
         cross_attention_dim=1280,
         attention_head_dim=8,
+        mid_block_type='UNetMidBlock2DCrossAttn',
     ):
         super().__init__()
+        self.mid_block_type = mid_block_type
+        self.gradient_checkpointing = gradient_checkpointing
 
         self.sample_size = sample_size
         time_embed_dim = block_out_channels[0] * 4
@@ -72,17 +77,69 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
             self.down_blocks.append(down_block)
 
         # mid
-        self.mid_block = UNetMidBlock2DCrossAttn(
-            in_channels=block_out_channels[-1],
-            temb_channels=time_embed_dim,
-            resnet_eps=norm_eps,
-            resnet_act_fn=act_fn,
-            output_scale_factor=mid_block_scale_factor,
-            resnet_time_scale_shift="default",
-            cross_attention_dim=cross_attention_dim,
-            attn_num_head_channels=attention_head_dim,
-            resnet_groups=norm_num_groups,
-        )
+        #import pdb; pdb.set_trace()
+        if self.mid_block_type == 'UNetMidBlock2DCrossAttn':
+            self.mid_block = UNetMidBlock2DCrossAttn(
+                in_channels=block_out_channels[-1],
+                temb_channels=time_embed_dim,
+                resnet_eps=norm_eps,
+                resnet_act_fn=act_fn,
+                output_scale_factor=mid_block_scale_factor,
+                resnet_time_scale_shift="default",
+                cross_attention_dim=cross_attention_dim,
+                attn_num_head_channels=attention_head_dim,
+                resnet_groups=norm_num_groups,
+            )
+        elif self.mid_block_type == 'UNetMidBlock2DCrossAttnLSTM':
+            self.mid_block = UNetMidBlock2DCrossAttnLSTM(
+                in_channels=block_out_channels[-1],
+                temb_channels=time_embed_dim,
+                resnet_eps=norm_eps,
+                resnet_act_fn=act_fn,
+                output_scale_factor=mid_block_scale_factor,
+                resnet_time_scale_shift="default",
+                cross_attention_dim=cross_attention_dim,
+                attn_num_head_channels=attention_head_dim,
+                resnet_groups=norm_num_groups,
+            )
+        elif self.mid_block_type == 'UNetMidBlock2DCrossAttnDecoderPosition':
+            self.mid_block = UNetMidBlock2DCrossAttnDecoderPosition(
+                in_channels=block_out_channels[-1],
+                temb_channels=time_embed_dim,
+                resnet_eps=norm_eps,
+                resnet_act_fn=act_fn,
+                output_scale_factor=mid_block_scale_factor,
+                resnet_time_scale_shift="default",
+                cross_attention_dim=cross_attention_dim,
+                attn_num_head_channels=attention_head_dim,
+                resnet_groups=norm_num_groups,
+            )
+        elif self.mid_block_type == 'UNetMidBlock2DCrossAttnDecoderPositionEncoderPosition':
+            self.mid_block = UNetMidBlock2DCrossAttnDecoderPositionEncoderPosition(
+                in_channels=block_out_channels[-1],
+                temb_channels=time_embed_dim,
+                resnet_eps=norm_eps,
+                resnet_act_fn=act_fn,
+                output_scale_factor=mid_block_scale_factor,
+                resnet_time_scale_shift="default",
+                cross_attention_dim=cross_attention_dim,
+                attn_num_head_channels=attention_head_dim,
+                resnet_groups=norm_num_groups,
+            )
+        elif self.mid_block_type == 'UNetMidBlock2DCrossAttnEncoderPosition':
+            self.mid_block = UNetMidBlock2DCrossAttnEncoderPosition(
+                in_channels=block_out_channels[-1],
+                temb_channels=time_embed_dim,
+                resnet_eps=norm_eps,
+                resnet_act_fn=act_fn,
+                output_scale_factor=mid_block_scale_factor,
+                resnet_time_scale_shift="default",
+                cross_attention_dim=cross_attention_dim,
+                attn_num_head_channels=attention_head_dim,
+                resnet_groups=norm_num_groups,
+            )
+        else:
+            assert False, self.mid_block_type
 
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
@@ -117,10 +174,11 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
 
     def forward(
         self,
-        sample: torch.FloatTensor,
-        timestep: Union[torch.Tensor, float, int],
-        encoder_hidden_states: torch.Tensor,
-    ) -> Dict[str, torch.FloatTensor]:
+        sample,#: torch.FloatTensor,
+        timestep,#: Union[torch.Tensor, float, int],
+        encoder_hidden_states,#: torch.Tensor,
+        attention_mask=None,
+        ): #-> Dict[str, torch.FloatTensor]:
 
         # 0. center input if necessary
         if self.config.center_input_sample:
@@ -146,17 +204,26 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         down_block_res_samples = (sample,)
         for downsample_block in self.down_blocks:
 
-            if hasattr(downsample_block, "attentions") and downsample_block.attentions is not None:
-                sample, res_samples = downsample_block(
-                    hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states
-                )
+            if hasattr(downsample_block, "attentions") and downsample_block.attentions is not None and (isinstance(downsample_block, CrossAttnDownBlock2D) or isinstance(downsample_block, CrossAttnDecoderPositionDownBlock2D) or isinstance(downsample_block, CrossAttnDecoderPositionEncoderPositionDownBlock2D) or isinstance(downsample_block, CrossAttnEncoderPositionDownBlock2D) or isinstance(downsample_block, CrossAttnLSTMDownBlock2D)):
+                #import pdb; pdb.set_trace()
+                if not self.gradient_checkpointing:
+                    sample, res_samples = downsample_block(
+                        hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states, attention_mask=attention_mask
+                    )
+                else:
+                    #X = torch.utils.checkpoint.checkpoint(self.cnn_block_2, X)
+                    sample, res_samples = torch.utils.checkpoint.checkpoint(downsample_block, 
+                        (sample, emb, encoder_hidden_states, attention_mask))
             else:
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
 
             down_block_res_samples += res_samples
 
         # 4. mid
-        sample = self.mid_block(sample, emb, encoder_hidden_states=encoder_hidden_states)
+        if not self.gradient_checkpointing:
+            sample = self.mid_block(sample, emb, encoder_hidden_states=encoder_hidden_states, attention_mask=attention_mask)
+        else:
+            sample = torch.utils.checkpoint.checkpoint(self.mid_block, (sample, emb, encoder_hidden_states, attention_mask))
 
         # 5. up
         for upsample_block in self.up_blocks:
@@ -164,13 +231,17 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
             res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
             down_block_res_samples = down_block_res_samples[: -len(upsample_block.resnets)]
 
-            if hasattr(upsample_block, "attentions") and upsample_block.attentions is not None:
-                sample = upsample_block(
-                    hidden_states=sample,
-                    temb=emb,
-                    res_hidden_states_tuple=res_samples,
-                    encoder_hidden_states=encoder_hidden_states,
-                )
+            if hasattr(upsample_block, "attentions") and upsample_block.attentions is not None and (isinstance(upsample_block, CrossAttnUpBlock2D) or isinstance(upsample_block, CrossAttnDecoderPositionUpBlock2D) or isinstance(upsample_block, CrossAttnDecoderPositionEncoderPositionUpBlock2D) or isinstance(upsample_block, CrossAttnEncoderPositionUpBlock2D) or isinstance(upsample_block, CrossAttnLSTMUpBlock2D)):
+                if not self.gradient_checkpointing:
+                    sample = upsample_block(
+                        hidden_states=sample,
+                        temb=emb,
+                        res_hidden_states_tuple=res_samples,
+                        encoder_hidden_states=encoder_hidden_states,
+                        attention_mask=attention_mask,
+                    )
+                else:
+                    sample = torch.utils.checkpoint.checkpoint(upsample_block, (sample, res_samples, emb, encoder_hidden_states, attention_mask))
             else:
                 sample = upsample_block(hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples)
 

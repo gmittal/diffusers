@@ -107,7 +107,7 @@ class SpatialTransformer(nn.Module):
 
         self.proj_out = nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
 
-    def forward(self, x, context=None):
+    def forward(self, x, context=None, attention_mask=None):
         # note: if no context is given, cross-attention defaults to self-attention
         b, c, h, w = x.shape
         x_in = x
@@ -115,11 +115,192 @@ class SpatialTransformer(nn.Module):
         x = self.proj_in(x)
         x = x.permute(0, 2, 3, 1).reshape(b, h * w, c)
         for block in self.transformer_blocks:
-            x = block(x, context=context)
+            x = block(x, context=context, attention_mask=attention_mask)
         x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
         x = self.proj_out(x)
         return x + x_in
 
+class SpatialDecoderPositionTransformer(nn.Module):
+    """
+    Transformer block for image-like data. First, project the input (aka embedding) and reshape to b, t, d. Then apply
+    standard transformer action. Finally, reshape to image
+    """
+
+    def __init__(self, in_channels, n_heads, d_head, depth=1, dropout=0.0, context_dim=None, max_h=64, max_w=320):
+        super().__init__()
+        self.n_heads = n_heads
+        self.d_head = d_head
+        self.in_channels = in_channels
+        inner_dim = n_heads * d_head
+        self.norm = torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+
+        self.wpe_h = nn.Embedding(max_h, inner_dim//2)
+        self.wpe_w = nn.Embedding(max_w, inner_dim//2)
+
+        self.proj_in = nn.Conv2d(in_channels, inner_dim, kernel_size=1, stride=1, padding=0)
+
+        self.transformer_blocks = nn.ModuleList(
+            [
+                BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim)
+                for d in range(depth)
+            ]
+        )
+
+        self.proj_out = nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x, context=None, attention_mask=None):
+        # note: if no context is given, cross-attention defaults to self-attention
+        b, c, h, w = x.shape
+        #import pdb; pdb.set_trace()
+        device = x.device
+        position_ids_h = torch.arange(0, h, dtype=torch.long, device=device)
+        position_ids_w = torch.arange(0, w, dtype=torch.long, device=device)
+
+
+        position_embs_h = self.wpe_h(position_ids_h).transpose(-1, -2) # inner_dim//2, h
+        position_embs_w = self.wpe_w(position_ids_w).transpose(-1, -2) # inner_dim//2, w
+
+        position_embs_h = position_embs_h.unsqueeze(-1) # inner_dim//2, h, 1
+        position_embs_w = position_embs_w.unsqueeze(-2) # inner_dim//2, 1, w
+        position_embs = torch.cat((position_embs_h.expand(-1, -1, w), position_embs_w.expand(-1, h, -1)), dim=0) # inner_dim, h, w
+
+        x = x + position_embs.unsqueeze(0)
+
+        x_in = x
+        x = self.norm(x)
+        x = self.proj_in(x)
+        x = x.permute(0, 2, 3, 1).reshape(b, h * w, c)
+        for block in self.transformer_blocks:
+            x = block(x, context=context, attention_mask=attention_mask)
+        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
+        x = self.proj_out(x)
+        return x + x_in
+
+class SpatialDecoderPositionEncoderPositionTransformer(nn.Module):
+    """
+    Transformer block for image-like data. First, project the input (aka embedding) and reshape to b, t, d. Then apply
+    standard transformer action. Finally, reshape to image
+    """
+
+    def __init__(self, in_channels, n_heads, d_head, depth=1, dropout=0.0, context_dim=None, max_h=64, max_w=320, max_l=512):
+        super().__init__()
+        self.n_heads = n_heads
+        self.d_head = d_head
+        self.in_channels = in_channels
+        inner_dim = n_heads * d_head
+        self.norm = torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+
+        self.wpe_l = nn.Embedding(max_l, context_dim)
+
+        self.wpe_h = nn.Embedding(max_h, inner_dim//2)
+        self.wpe_w = nn.Embedding(max_w, inner_dim//2)
+
+        self.proj_in = nn.Conv2d(in_channels, inner_dim, kernel_size=1, stride=1, padding=0)
+
+        self.transformer_blocks = nn.ModuleList(
+            [
+                BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim)
+                for d in range(depth)
+            ]
+        )
+
+        self.proj_out = nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x, context=None, attention_mask=None):
+        # note: if no context is given, cross-attention defaults to self-attention
+        b, c, h, w = x.shape
+        #import pdb; pdb.set_trace()
+        device = x.device
+        l = context.shape[1] # context: b, l, context_dim
+        position_ids_l = torch.arange(0, l, dtype=torch.long, device=device)
+        position_embs_l = self.wpe_l(position_ids_l) # l, context_dim
+        context = context + position_embs_l.unsqueeze(0)
+
+        position_ids_h = torch.arange(0, h, dtype=torch.long, device=device)
+        position_ids_w = torch.arange(0, w, dtype=torch.long, device=device)
+
+
+        position_embs_h = self.wpe_h(position_ids_h).transpose(-1, -2) # inner_dim//2, h
+        position_embs_w = self.wpe_w(position_ids_w).transpose(-1, -2) # inner_dim//2, w
+
+        position_embs_h = position_embs_h.unsqueeze(-1) # inner_dim//2, h, 1
+        position_embs_w = position_embs_w.unsqueeze(-2) # inner_dim//2, 1, w
+        position_embs = torch.cat((position_embs_h.expand(-1, -1, w), position_embs_w.expand(-1, h, -1)), dim=0) # inner_dim, h, w
+
+        x = x + position_embs.unsqueeze(0)
+
+        x_in = x
+        x = self.norm(x)
+        x = self.proj_in(x)
+        x = x.permute(0, 2, 3, 1).reshape(b, h * w, c)
+        for block in self.transformer_blocks:
+            x = block(x, context=context, attention_mask=attention_mask)
+        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
+        x = self.proj_out(x)
+        return x + x_in
+
+class SpatialEncoderPositionTransformer(nn.Module):
+    """
+    Transformer block for image-like data. First, project the input (aka embedding) and reshape to b, t, d. Then apply
+    standard transformer action. Finally, reshape to image
+    """
+
+    def __init__(self, in_channels, n_heads, d_head, depth=1, dropout=0.0, context_dim=None, max_h=64, max_w=320, max_l=512):
+        super().__init__()
+        self.n_heads = n_heads
+        self.d_head = d_head
+        self.in_channels = in_channels
+        inner_dim = n_heads * d_head
+        self.norm = torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+
+        self.wpe_l = nn.Embedding(max_l, context_dim)
+
+        #self.wpe_h = nn.Embedding(max_h, inner_dim//2)
+        #self.wpe_w = nn.Embedding(max_w, inner_dim//2)
+
+        self.proj_in = nn.Conv2d(in_channels, inner_dim, kernel_size=1, stride=1, padding=0)
+
+        self.transformer_blocks = nn.ModuleList(
+            [
+                BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim)
+                for d in range(depth)
+            ]
+        )
+
+        self.proj_out = nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x, context=None, attention_mask=None):
+        # note: if no context is given, cross-attention defaults to self-attention
+        b, c, h, w = x.shape
+        #import pdb; pdb.set_trace()
+        device = x.device
+        l = context.shape[1] # context: b, l, context_dim
+        position_ids_l = torch.arange(0, l, dtype=torch.long, device=device)
+        position_embs_l = self.wpe_l(position_ids_l) # l, context_dim
+        context = context + position_embs_l.unsqueeze(0)
+
+        #position_ids_h = torch.arange(0, h, dtype=torch.long, device=device)
+        #position_ids_w = torch.arange(0, w, dtype=torch.long, device=device)
+
+
+        #position_embs_h = self.wpe_h(position_ids_h).transpose(-1, -2) # inner_dim//2, h
+        #position_embs_w = self.wpe_w(position_ids_w).transpose(-1, -2) # inner_dim//2, w
+
+        #position_embs_h = position_embs_h.unsqueeze(-1) # inner_dim//2, h, 1
+        #position_embs_w = position_embs_w.unsqueeze(-2) # inner_dim//2, 1, w
+        #position_embs = torch.cat((position_embs_h.expand(-1, -1, w), position_embs_w.expand(-1, h, -1)), dim=0) # inner_dim, h, w
+
+        #x = x + position_embs.unsqueeze(0)
+
+        x_in = x
+        x = self.norm(x)
+        x = self.proj_in(x)
+        x = x.permute(0, 2, 3, 1).reshape(b, h * w, c)
+        for block in self.transformer_blocks:
+            x = block(x, context=context, attention_mask=attention_mask)
+        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
+        x = self.proj_out(x)
+        return x + x_in
 
 class BasicTransformerBlock(nn.Module):
     def __init__(self, dim, n_heads, d_head, dropout=0.0, context_dim=None, gated_ff=True, checkpoint=True):
@@ -136,9 +317,9 @@ class BasicTransformerBlock(nn.Module):
         self.norm3 = nn.LayerNorm(dim)
         self.checkpoint = checkpoint
 
-    def forward(self, x, context=None):
+    def forward(self, x, context=None, attention_mask=None):
         x = self.attn1(self.norm1(x)) + x
-        x = self.attn2(self.norm2(x), context=context) + x
+        x = self.attn2(self.norm2(x), context=context, attention_mask=attention_mask) + x
         x = self.ff(self.norm3(x)) + x
         return x
 
@@ -172,8 +353,14 @@ class CrossAttention(nn.Module):
         tensor = tensor.permute(0, 2, 1, 3).reshape(batch_size // head_size, seq_len, dim * head_size)
         return tensor
 
-    def forward(self, x, context=None, mask=None):
+    def forward(self, x, context=None, attention_mask=None):
+        mask = attention_mask
+        if context is not None:
+            #assert mask is not None
+            if mask is not None:
+                mask = mask.eq(1)
         batch_size, sequence_length, dim = x.shape
+        #import pdb; pdb.set_trace()
 
         h = self.heads
 

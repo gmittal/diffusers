@@ -28,7 +28,7 @@ class DDPMPipeline(DiffusionPipeline):
         self.register_modules(unet=unet, scheduler=scheduler)
 
     @torch.no_grad()
-    def __call__(self, batch_size=1, generator=None, output_type="pil", **kwargs):
+    def __call__(self, batch_size=1, generator=None, encoder_hidden_states=None, attention_mask=None, output_type="pil", **kwargs):
         if "torch_device" in kwargs:
             device = kwargs.pop("torch_device")
             warnings.warn(
@@ -43,7 +43,7 @@ class DDPMPipeline(DiffusionPipeline):
 
         # Sample gaussian noise to begin loop
         image = torch.randn(
-            (batch_size, self.unet.in_channels, self.unet.sample_size, self.unet.sample_size),
+            (batch_size, self.unet.in_channels, self.unet.sample_size[0], self.unet.sample_size[1]),
             generator=generator,
         )
         image = image.to(self.device)
@@ -53,7 +53,7 @@ class DDPMPipeline(DiffusionPipeline):
 
         for t in self.progress_bar(self.scheduler.timesteps):
             # 1. predict noise model_output
-            model_output = self.unet(image, t)["sample"]
+            model_output = self.unet(image, t, encoder_hidden_states, attention_mask)["sample"]
 
             # 2. compute previous image: x_t -> t_t-1
             image = self.scheduler.step(model_output, t, image, generator=generator)["prev_sample"]

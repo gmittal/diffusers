@@ -28,6 +28,7 @@ from tqdm.auto import tqdm
 from .configuration_utils import ConfigMixin
 from .utils import DIFFUSERS_CACHE, logging
 
+import numpy as np
 
 INDEX_FILE = "diffusion_pytorch_model.bin"
 
@@ -264,6 +265,9 @@ class DiffusionPipeline(ConfigMixin):
         if images.ndim == 3:
             images = images[None, ...]
         images = (images * 255).round().astype("uint8")
+        if images.shape[-1] == 1:
+            images = np.squeeze(images, -1)
+        #import pdb; pdb.set_trace()
         pil_images = [Image.fromarray(image) for image in images]
 
         return pil_images
