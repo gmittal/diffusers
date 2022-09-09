@@ -333,7 +333,14 @@ class ResnetBlock2D(nn.Module):
 
         # make sure hidden states is in float32
         # when running in half-precision
-        hidden_states = self.norm1(hidden_states.float()).type(hidden_states.dtype)
+        #Yuntian hidden_states = self.norm1(hidden_states.float()).type(hidden_states.dtype)
+        #import pdb; pdb.set_trace()
+        #hidden_states = self.norm1(hidden_states.float())
+        #hidden_states = self.norm1(hidden_states.float()).type(hidden_states.dtype)
+        orig_dtype = hidden_states.dtype
+        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float32):
+            hidden_states = self.norm1(hidden_states)
+        hidden_states = hidden_states.type(orig_dtype)
         hidden_states = self.nonlinearity(hidden_states)
 
         if self.upsample is not None:
@@ -351,7 +358,10 @@ class ResnetBlock2D(nn.Module):
 
         # make sure hidden states is in float32
         # when running in half-precision
-        hidden_states = self.norm2(hidden_states.float()).type(hidden_states.dtype)
+        # Yuntian hidden_states = self.norm2(hidden_states.float()).type(hidden_states.dtype)
+        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float32):
+            hidden_states = self.norm2(hidden_states)
+        hidden_states = hidden_states.type(orig_dtype)
         hidden_states = self.nonlinearity(hidden_states)
 
         hidden_states = self.dropout(hidden_states)

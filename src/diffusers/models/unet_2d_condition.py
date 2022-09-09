@@ -248,7 +248,11 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         # 6. post-process
         # make sure hidden states is in float32
         # when running in half-precision
-        sample = self.conv_norm_out(sample.float()).type(sample.dtype)
+        #sample = self.conv_norm_out(sample.float()).type(sample.dtype)
+        orig_dtype = sample.dtype
+        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float32):
+            sample = self.conv_norm_out(sample)
+        sample = sample.type(orig_dtype)
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
 

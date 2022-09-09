@@ -65,6 +65,11 @@ class TimestepEmbedding(nn.Module):
         self.linear_2 = nn.Linear(time_embed_dim, time_embed_dim)
 
     def forward(self, sample):
+        #print (self.linear_1.weight)
+        #print (self.linear_1.bias)
+        #print ('='*10)
+        sample = sample.to(self.linear_1.bias.dtype)
+        #print (sample)
         sample = self.linear_1(sample)
 
         if self.act is not None:

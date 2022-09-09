@@ -373,18 +373,22 @@ class CrossAttention(nn.Module):
         k = self.reshape_heads_to_batch_dim(k)
         v = self.reshape_heads_to_batch_dim(v)
 
-        sim = torch.einsum("b i d, b j d -> b i j", q, k) * self.scale
+        #import pdb; pdb.set_trace()
+        #with torch.cuda.amp.autocast(enabled=False):#, device_type=q.device_type):
+        if True:
+            sim = torch.einsum("b i d, b j d -> b i j", q, k) * self.scale
 
-        if mask is not None:
-            mask = mask.reshape(batch_size, -1)
-            max_neg_value = -torch.finfo(sim.dtype).max
-            mask = mask[:, None, :].repeat(h, 1, 1)
-            sim.masked_fill_(~mask, max_neg_value)
+            if mask is not None:
+                mask = mask.reshape(batch_size, -1)
+                max_neg_value = -torch.finfo(sim.dtype).max
+                mask = mask[:, None, :].repeat(h, 1, 1)
+                sim.masked_fill_(~mask, max_neg_value)
 
-        # attention, what we cannot get enough of
-        attn = sim.softmax(dim=-1)
+            # attention, what we cannot get enough of
+            attn = sim.softmax(dim=-1)
 
-        out = torch.einsum("b i j, b j d -> b i d", attn, v)
+            out = torch.einsum("b i j, b j d -> b i d", attn, v)
+        #out = out.to(dtype=q.dtype)
         out = self.reshape_batch_dim_to_heads(out)
         return self.to_out(out)
 
