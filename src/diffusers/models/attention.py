@@ -39,7 +39,7 @@ class AttentionBlock(nn.Module):
     def transpose_for_scores(self, projection: torch.Tensor) -> torch.Tensor:
         new_projection_shape = projection.size()[:-1] + (self.num_heads, -1)
         # move heads to 2nd position (B, T, H * D) -> (B, T, H, D) -> (B, H, T, D)
-        new_projection = projection.view(new_projection_shape).permute(0, 2, 1, 3)
+        new_projection = projection.view(new_projection_shape).permute(0, 2, 1, 3).contiguous()
         return new_projection
 
     def forward(self, hidden_states):
@@ -49,7 +49,7 @@ class AttentionBlock(nn.Module):
         # norm
         hidden_states = self.group_norm(hidden_states)
 
-        hidden_states = hidden_states.view(batch, channel, height * width).transpose(1, 2)
+        hidden_states = hidden_states.view(batch, channel, height * width).transpose(1, 2).contiguous()
 
         # proj to q, k, v
         query_proj = self.query(hidden_states)
@@ -63,7 +63,7 @@ class AttentionBlock(nn.Module):
 
         # get scores
         scale = 1 / math.sqrt(math.sqrt(self.channels / self.num_heads))
-        attention_scores = torch.matmul(query_states * scale, key_states.transpose(-1, -2) * scale)
+        attention_scores = torch.matmul(query_states * scale, key_states.transpose(-1, -2).contiguous() * scale)
         attention_probs = torch.softmax(attention_scores.float(), dim=-1).type(attention_scores.dtype)
 
         # compute attention output
@@ -75,7 +75,7 @@ class AttentionBlock(nn.Module):
 
         # compute next hidden_states
         hidden_states = self.proj_attn(context_states)
-        hidden_states = hidden_states.transpose(-1, -2).reshape(batch, channel, height, width)
+        hidden_states = hidden_states.transpose(-1, -2).contiguous().reshape(batch, channel, height, width)
 
         # res connect and rescale
         hidden_states = (hidden_states + residual) / self.rescale_output_factor
@@ -113,10 +113,10 @@ class SpatialTransformer(nn.Module):
         x_in = x
         x = self.norm(x)
         x = self.proj_in(x)
-        x = x.permute(0, 2, 3, 1).reshape(b, h * w, c)
+        x = x.permute(0, 2, 3, 1).contiguous().reshape(b, h * w, c)
         for block in self.transformer_blocks:
             x = block(x, context=context, attention_mask=attention_mask)
-        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
+        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2).contiguous()
         x = self.proj_out(x)
         return x + x_in
 
@@ -157,8 +157,8 @@ class SpatialDecoderPositionTransformer(nn.Module):
         position_ids_w = torch.arange(0, w, dtype=torch.long, device=device)
 
 
-        position_embs_h = self.wpe_h(position_ids_h).transpose(-1, -2) # inner_dim//2, h
-        position_embs_w = self.wpe_w(position_ids_w).transpose(-1, -2) # inner_dim//2, w
+        position_embs_h = self.wpe_h(position_ids_h).transpose(-1, -2).contiguous() # inner_dim//2, h
+        position_embs_w = self.wpe_w(position_ids_w).transpose(-1, -2).contiguous() # inner_dim//2, w
 
         position_embs_h = position_embs_h.unsqueeze(-1) # inner_dim//2, h, 1
         position_embs_w = position_embs_w.unsqueeze(-2) # inner_dim//2, 1, w
@@ -169,10 +169,10 @@ class SpatialDecoderPositionTransformer(nn.Module):
         x_in = x
         x = self.norm(x)
         x = self.proj_in(x)
-        x = x.permute(0, 2, 3, 1).reshape(b, h * w, c)
+        x = x.permute(0, 2, 3, 1).contiguous().reshape(b, h * w, c)
         for block in self.transformer_blocks:
             x = block(x, context=context, attention_mask=attention_mask)
-        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
+        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2).contiguous()
         x = self.proj_out(x)
         return x + x_in
 
@@ -220,8 +220,8 @@ class SpatialDecoderPositionEncoderPositionTransformer(nn.Module):
         position_ids_w = torch.arange(0, w, dtype=torch.long, device=device)
 
 
-        position_embs_h = self.wpe_h(position_ids_h).transpose(-1, -2) # inner_dim//2, h
-        position_embs_w = self.wpe_w(position_ids_w).transpose(-1, -2) # inner_dim//2, w
+        position_embs_h = self.wpe_h(position_ids_h).transpose(-1, -2).contiguous() # inner_dim//2, h
+        position_embs_w = self.wpe_w(position_ids_w).transpose(-1, -2).contiguous() # inner_dim//2, w
 
         position_embs_h = position_embs_h.unsqueeze(-1) # inner_dim//2, h, 1
         position_embs_w = position_embs_w.unsqueeze(-2) # inner_dim//2, 1, w
@@ -232,10 +232,10 @@ class SpatialDecoderPositionEncoderPositionTransformer(nn.Module):
         x_in = x
         x = self.norm(x)
         x = self.proj_in(x)
-        x = x.permute(0, 2, 3, 1).reshape(b, h * w, c)
+        x = x.permute(0, 2, 3, 1).contiguous().reshape(b, h * w, c)
         for block in self.transformer_blocks:
             x = block(x, context=context, attention_mask=attention_mask)
-        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
+        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2).contiguous()
         x = self.proj_out(x)
         return x + x_in
 
@@ -295,10 +295,10 @@ class SpatialEncoderPositionTransformer(nn.Module):
         x_in = x
         x = self.norm(x)
         x = self.proj_in(x)
-        x = x.permute(0, 2, 3, 1).reshape(b, h * w, c)
+        x = x.permute(0, 2, 3, 1).contiguous().reshape(b, h * w, c)
         for block in self.transformer_blocks:
             x = block(x, context=context, attention_mask=attention_mask)
-        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
+        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2).contiguous()
         x = self.proj_out(x)
         return x + x_in
 
@@ -343,14 +343,14 @@ class CrossAttention(nn.Module):
         batch_size, seq_len, dim = tensor.shape
         head_size = self.heads
         tensor = tensor.reshape(batch_size, seq_len, head_size, dim // head_size)
-        tensor = tensor.permute(0, 2, 1, 3).reshape(batch_size * head_size, seq_len, dim // head_size)
+        tensor = tensor.permute(0, 2, 1, 3).contiguous().reshape(batch_size * head_size, seq_len, dim // head_size)
         return tensor
 
     def reshape_batch_dim_to_heads(self, tensor):
         batch_size, seq_len, dim = tensor.shape
         head_size = self.heads
         tensor = tensor.reshape(batch_size // head_size, head_size, seq_len, dim)
-        tensor = tensor.permute(0, 2, 1, 3).reshape(batch_size // head_size, seq_len, dim * head_size)
+        tensor = tensor.permute(0, 2, 1, 3).contiguous().reshape(batch_size // head_size, seq_len, dim * head_size)
         return tensor
 
     def forward(self, x, context=None, attention_mask=None):
