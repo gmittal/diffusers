@@ -182,7 +182,7 @@ class SpatialDecoderPositionEncoderPositionTransformer(nn.Module):
     standard transformer action. Finally, reshape to image
     """
 
-    def __init__(self, in_channels, n_heads, d_head, depth=1, dropout=0.0, context_dim=None, max_h=64, max_w=320, max_l=512):
+    def __init__(self, in_channels, n_heads, d_head, depth=1, dropout=0.0, context_dim=None, max_h=64, max_w=320, max_l=1025):
         super().__init__()
         self.n_heads = n_heads
         self.d_head = d_head
@@ -245,7 +245,7 @@ class SpatialEncoderPositionTransformer(nn.Module):
     standard transformer action. Finally, reshape to image
     """
 
-    def __init__(self, in_channels, n_heads, d_head, depth=1, dropout=0.0, context_dim=None, max_h=64, max_w=320, max_l=512):
+    def __init__(self, in_channels, n_heads, d_head, depth=1, dropout=0.0, context_dim=None, max_h=64, max_w=320, max_l=1025):
         super().__init__()
         self.n_heads = n_heads
         self.d_head = d_head

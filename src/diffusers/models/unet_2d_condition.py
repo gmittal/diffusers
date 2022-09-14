@@ -33,9 +33,11 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         cross_attention_dim=1280,
         attention_head_dim=8,
         mid_block_type='UNetMidBlock2DCrossAttn',
+        max_l=1025,
     ):
         super().__init__()
         self.mid_block_type = mid_block_type
+        self.max_l = max_l
         self.gradient_checkpointing = gradient_checkpointing
 
         self.sample_size = sample_size
@@ -73,6 +75,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
                 cross_attention_dim=cross_attention_dim,
                 attn_num_head_channels=attention_head_dim,
                 downsample_padding=downsample_padding,
+                max_l=self.max_l,
             )
             self.down_blocks.append(down_block)
 
@@ -125,6 +128,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
                 cross_attention_dim=cross_attention_dim,
                 attn_num_head_channels=attention_head_dim,
                 resnet_groups=norm_num_groups,
+                max_l=self.max_l,
             )
         elif self.mid_block_type == 'UNetMidBlock2DCrossAttnEncoderPosition':
             self.mid_block = UNetMidBlock2DCrossAttnEncoderPosition(
@@ -163,6 +167,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
                 resnet_act_fn=act_fn,
                 cross_attention_dim=cross_attention_dim,
                 attn_num_head_channels=attention_head_dim,
+                max_l=self.max_l,
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel

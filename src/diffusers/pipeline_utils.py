@@ -259,6 +259,7 @@ class DiffusionPipeline(ConfigMixin):
 
     @staticmethod
     def numpy_to_pil(images):
+        #import pdb; pdb.set_trace()
         """
         Convert a numpy image or a batch of images to a PIL image.
         """
