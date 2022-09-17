@@ -180,7 +180,7 @@ class DDPMPipeline(DiffusionPipeline):
 
         # set step values
         self.scheduler.set_timesteps(1000)
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
 
         for t in self.progress_bar(self.scheduler.timesteps):
             if swap_step == t:

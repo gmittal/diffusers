@@ -179,6 +179,60 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
 
         return {"prev_sample": pred_prev_sample}
 
+    def get_lambda(
+        self,
+        timesteps: torch.FloatTensor,
+    ):
+        #import pdb; pdb.set_trace()
+        lambs = timesteps.new_zeros(timesteps.size()).float()
+        #beta_prod_ts = timesteps.new_zeros(timesteps.size()).float()
+        #alpha_prod_ts = timesteps.new_zeros(timesteps.size()).float()
+        for i, t in enumerate(timesteps):
+            t = t.item()
+            assert t >= 100, timesteps
+            # 1. compute alphas, betas
+            alpha_prod_t = self.alphas_cumprod[t]
+            alpha_prod_t_prev = self.alphas_cumprod[t - 1] if t > 0 else self.one
+            beta_prod_t = 1 - alpha_prod_t
+            beta_prod_t_prev = 1 - alpha_prod_t_prev
+
+            # 2. compute predicted original sample from predicted noise also called
+            # "predicted x_0" of formula (15) from https://arxiv.org/pdf/2006.11239.pdf
+            lamb = beta_prod_t ** (0.5)
+            lambs[i] = lamb.item()
+            #beta_prod_ts[i] = beta_prod_t.item()
+            #alpha_prod_ts[i] = alpha_prod_t.item()
+        #pred_original_sample = (sample - beta_prod_t ** (0.5) * model_output) / alpha_prod_t ** (0.5)
+        #    pred_original_sample = self.clip(pred_original_sample, -1, 1)
+        return lambs#, beta_prod_ts, alpha_prod_ts
+
+    def get_lambda_and_alpha(
+        self,
+        timesteps: torch.FloatTensor,
+    ):
+        #import pdb; pdb.set_trace()
+        lambs = timesteps.new_zeros(timesteps.size()).float()
+        #beta_prod_ts = timesteps.new_zeros(timesteps.size()).float()
+        alpha_prod_ts = timesteps.new_zeros(timesteps.size()).float()
+        for i, t in enumerate(timesteps):
+            t = t.item()
+            #assert t >= 100, timesteps
+            # 1. compute alphas, betas
+            alpha_prod_t = self.alphas_cumprod[t]
+            alpha_prod_t_prev = self.alphas_cumprod[t - 1] if t > 0 else self.one
+            beta_prod_t = 1 - alpha_prod_t
+            beta_prod_t_prev = 1 - alpha_prod_t_prev
+
+            # 2. compute predicted original sample from predicted noise also called
+            # "predicted x_0" of formula (15) from https://arxiv.org/pdf/2006.11239.pdf
+            lamb = beta_prod_t ** (0.5)
+            lambs[i] = lamb.item()
+            #beta_prod_ts[i] = beta_prod_t.item()
+            alpha_prod_ts[i] = alpha_prod_t.item() ** (0.5)
+        #pred_original_sample = (sample - beta_prod_t ** (0.5) * model_output) / alpha_prod_t ** (0.5)
+        #    pred_original_sample = self.clip(pred_original_sample, -1, 1)
+        return lambs, alpha_prod_ts#, beta_prod_ts, alpha_prod_ts
+
     def step_clean(
         self,
         model_output: Union[torch.FloatTensor, np.ndarray],
@@ -187,6 +241,7 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
         predict_epsilon=True,
         generator=None,
     ):
+        #import pdb; pdb.set_trace()
         t = timestep
 
         if model_output.shape[1] == sample.shape[1] * 2 and self.variance_type in ["learned", "learned_range"]:
