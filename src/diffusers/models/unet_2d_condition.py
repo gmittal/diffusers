@@ -72,6 +72,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
                 add_downsample=not is_final_block,
                 resnet_eps=norm_eps,
                 resnet_act_fn=act_fn,
+                resnet_groups=norm_num_groups,
                 cross_attention_dim=cross_attention_dim,
                 attn_num_head_channels=attention_head_dim,
                 downsample_padding=downsample_padding,
@@ -165,6 +166,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
                 add_upsample=not is_final_block,
                 resnet_eps=norm_eps,
                 resnet_act_fn=act_fn,
+                resnet_groups=norm_num_groups,
                 cross_attention_dim=cross_attention_dim,
                 attn_num_head_channels=attention_head_dim,
                 max_l=self.max_l,
@@ -217,7 +219,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
                     )
                 else:
                     #X = torch.utils.checkpoint.checkpoint(self.cnn_block_2, X)
-                    sample, res_samples = torch.utils.checkpoint.checkpoint(downsample_block, 
+                    sample, res_samples = torch.utils.checkpoint.checkpoint(downsample_block,
                         (sample, emb, encoder_hidden_states, attention_mask))
             else:
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
